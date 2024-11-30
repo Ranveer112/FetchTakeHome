@@ -6,6 +6,7 @@ package main
 import (
 	/* Package to write back to http.ResponseWriter */
 
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -39,13 +40,17 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 		items         []item
 		total         string
 	}
+	type processReceiptResponse struct {
+		id uint32
+	}
 	var requestBody processReceiptRequest
 	err := json.Unmarshal([]byte(body), &requestBody)
 	if err != nil {
 		/*
 		* Something went wrong while encoding it to json. Do proper error handling here
 		 */
-
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	} else {
 		/*
 		*Assume the request has been validated.
@@ -60,59 +65,72 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		//50 points for total being a whole number
-		matched, err := regexp.MatchString(`[.].*[1-9].*`, requestBody.total)
+		is_whole, err := regexp.MatchString(`[.].*[1-9].*`, requestBody.total)
 		if err != nil {
-			/*
-			* Something went wrong while pattern matching. Do proper error handling here
-			 */
-		} else {
-			if matched {
-				points += 50
-			}
-			/*
-				TODO - Implement 0.25 multiple point logic
-			*/
-			//5 points for every 2 items in the receipt
-			points += uint32(5 * (len(requestBody.items) / 2))
-			//For every item's trimmed description being a multiple of 3, add 0.2*trimmed_length points
-			for _, item := range requestBody.items {
-				if len(strings.Trim(item.shortDescription, " "))%3 == 0 {
-					price, err := strconv.ParseFloat(item.price, 64)
-					if err != nil {
-						/*
-						* Something went wrong while price conversion to float. Do proper error handling here
-						 */
-					}
-					points += uint32(math.Round(price * 0.2))
-				}
-			}
-			//6 points for day in date being odd
-			day, err := strconv.ParseUint(strings.Split(requestBody.purcharseDate, "-")[2], 10, 32)
-			if err != nil {
-				/*
-					Something went wrong while parsing the day portion of the date, do proper handling here
-				*/
-			} else if day%2 == 1 {
-				points += 6
-			}
-			purchaseTime := strings.Split(requestBody.purchaseTime, ":")
-			/*
-				TODO - Add time based point calculation
-			*/
-			point_for_id[id] = points
-
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if is_whole {
+			points += 50
 		}
+		// Fractional part is one of either .0 | .25 | .75
+		is_divisible_by_quarters, err := regexp.MatchString(`[.](25|75|0)[0]*$`, requestBody.total)
+		if err != nil {
+
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if is_divisible_by_quarters {
+			points += 25
+		}
+		//5 points for every 2 items in the receipt
+		points += uint32(5 * (len(requestBody.items) / 2))
+		//For every item's trimmed description being a multiple of 3, add 0.2*trimmed_length points
+		for _, item := range requestBody.items {
+			if len(strings.Trim(item.shortDescription, " "))%3 == 0 {
+				price, err := strconv.ParseFloat(item.price, 64)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				points += uint32(math.Round(price * 0.2))
+			}
+		}
+		//6 points for day in date being odd
+		day, err := strconv.ParseUint(strings.Split(requestBody.purcharseDate, "-")[2], 10, 32)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		} else if day%2 == 1 {
+			points += 6
+		}
+
+		// 10 points while
+		if "14:00" < requestBody.purchaseTime && requestBody.purchaseTime < "16:00" {
+			points += 10
+		}
+		point_for_id[id] = points
+		var processReceiptResponse processReceiptResponse
+		processReceiptResponse.id = id
+		response_body_bytes, err := json.Marshal(processReceiptResponse)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		fmt.Fprintf(w, string(response_body_bytes))
+
 	}
 
 }
 
 func get_points_handler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "ok")
 
 }
 
 func main() {
 	http.HandleFunc("/receipts/process", process_receipt_handler)
 	http.HandleFunc("/receipts/", get_points_handler)
+	// Resolve using -> https://groups.google.com/g/golang-nuts/c/gQw-kxkoRGY?pli=1
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
