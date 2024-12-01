@@ -19,6 +19,7 @@ import (
 	"log"
 	/* Package to encode/decode JSON */
 	"encoding/json"
+	"io"
 )
 
 /*
@@ -28,23 +29,27 @@ var point_for_id map[uint32]uint32
 var smallest_unused_id uint32
 
 func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
-	body := r.FormValue("body")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	type item struct {
-		shortDescription string
-		price            string
+		ShortDescription string
+		Price            string
 	}
 	type processReceiptRequest struct {
-		retailer      string
-		purcharseDate string
-		purchaseTime  string
-		items         []item
-		total         string
+		Retailer     string
+		PurchaseDate string
+		PurchaseTime string
+		Items        []item
+		Total        string
 	}
 	type processReceiptResponse struct {
-		id uint32
+		Id uint32
 	}
 	var requestBody processReceiptRequest
-	err := json.Unmarshal([]byte(body), &requestBody)
+	err = json.Unmarshal(body, &requestBody)
 	if err != nil {
 		/*
 		* Something went wrong while encoding it to json. Do proper error handling here
@@ -52,28 +57,26 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	} else {
-		/*
-		*Assume the request has been validated.
-		 */
+
 		var id = smallest_unused_id
 		smallest_unused_id++
 		var points uint32
 		//1 point for every alphanumeric character
-		for _, element := range requestBody.retailer {
+		for _, element := range requestBody.Retailer {
 			if unicode.IsNumber(element) || unicode.IsLetter(element) {
 				points++
 			}
 		}
 		//50 points for total being a whole number
-		is_whole, err := regexp.MatchString(`[.].*[1-9].*`, requestBody.total)
+		is_fractional, err := regexp.MatchString(`[.].*[1-9].*`, requestBody.Total)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
-		} else if is_whole {
+		} else if !is_fractional {
 			points += 50
 		}
 		// Fractional part is one of either .0 | .25 | .75
-		is_divisible_by_quarters, err := regexp.MatchString(`[.](25|75|0)[0]*$`, requestBody.total)
+		is_divisible_by_quarters, err := regexp.MatchString(`[.](25|75|0)[0]*$`, requestBody.Total)
 		if err != nil {
 
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -82,20 +85,20 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 			points += 25
 		}
 		//5 points for every 2 items in the receipt
-		points += uint32(5 * (len(requestBody.items) / 2))
+		points += uint32(5 * (len(requestBody.Items) / 2))
 		//For every item's trimmed description being a multiple of 3, add 0.2*trimmed_length points
-		for _, item := range requestBody.items {
-			if len(strings.Trim(item.shortDescription, " "))%3 == 0 {
-				price, err := strconv.ParseFloat(item.price, 64)
+		for _, item := range requestBody.Items {
+			if len(strings.Trim(item.ShortDescription, " "))%3 == 0 {
+				price, err := strconv.ParseFloat(item.Price, 64)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-				points += uint32(math.Round(price * 0.2))
+				points += uint32(math.Ceil(price * 0.2))
 			}
 		}
 		//6 points for day in date being odd
-		day, err := strconv.ParseUint(strings.Split(requestBody.purcharseDate, "-")[2], 10, 32)
+		day, err := strconv.ParseUint(strings.Split(requestBody.PurchaseDate, "-")[2], 10, 32)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -104,30 +107,28 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 10 points while
-		if "14:00" < requestBody.purchaseTime && requestBody.purchaseTime < "16:00" {
+		if "14:00" < requestBody.PurchaseTime && requestBody.PurchaseTime < "16:00" {
 			points += 10
 		}
 		point_for_id[id] = points
 		var processReceiptResponse processReceiptResponse
-		processReceiptResponse.id = id
+		processReceiptResponse.Id = id
 		response_body_bytes, err := json.Marshal(processReceiptResponse)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		fmt.Fprintf(w, string(response_body_bytes))
-
 	}
 
 }
 
 func get_points_handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "ok")
 
 }
 
 func main() {
+	point_for_id = make(map[uint32]uint32)
 	http.HandleFunc("/receipts/process", process_receipt_handler)
 	http.HandleFunc("/receipts/", get_points_handler)
 	// Resolve using -> https://groups.google.com/g/golang-nuts/c/gQw-kxkoRGY?pli=1
