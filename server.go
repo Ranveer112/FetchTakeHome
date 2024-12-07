@@ -23,9 +23,12 @@ import (
 )
 
 /*
+TODO - Error handling is not proper. Fix it by adding custom messages rather than err.Error()
+*/
+/*
 * A hashtable of id as key and numeric points as value
  */
-var point_for_id map[uint32]uint32
+var points_for_ids map[uint32]uint32
 var smallest_unused_id uint32
 
 func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +89,7 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 		}
 		//5 points for every 2 items in the receipt
 		points += uint32(5 * (len(requestBody.Items) / 2))
-		//For every item's trimmed description being a multiple of 3, add 0.2*trimmed_length points
+		//For every item's trimmed description being a multiple of 3, add 0.2*(item's price) points
 		for _, item := range requestBody.Items {
 			if len(strings.Trim(item.ShortDescription, " "))%3 == 0 {
 				price, err := strconv.ParseFloat(item.Price, 64)
@@ -110,7 +113,7 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 		if "14:00" < requestBody.PurchaseTime && requestBody.PurchaseTime < "16:00" {
 			points += 10
 		}
-		point_for_id[id] = points
+		points_for_ids[id] = points
 		var processReceiptResponse processReceiptResponse
 		processReceiptResponse.Id = id
 		response_body_bytes, err := json.Marshal(processReceiptResponse)
@@ -124,14 +127,25 @@ func process_receipt_handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func get_points_handler(w http.ResponseWriter, r *http.Request) {
+	var input_id = r.PathValue("id")
+	id, err := strconv.ParseUint(input_id, 10, 32)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	point_for_id, id_exists := points_for_ids[uint32(id)]
+	if !id_exists {
+		http.Error(w, "No receipt with ID found", http.StatusBadRequest)
+	} else {
+		fmt.Fprintf(w, strconv.FormatUint(uint64(point_for_id), 10))
+	}
 
 }
 
 func main() {
-	point_for_id = make(map[uint32]uint32)
-	http.HandleFunc("/receipts/process", process_receipt_handler)
-	http.HandleFunc("/receipts/", get_points_handler)
-	// Resolve using -> https://groups.google.com/g/golang-nuts/c/gQw-kxkoRGY?pli=1
+	points_for_ids = make(map[uint32]uint32)
+	http.HandleFunc("POST /receipts/process", process_receipt_handler)
+	http.HandleFunc("GET /receipts/{id}", get_points_handler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
