@@ -1,5 +1,6 @@
-Receipt Processor
-A a webservice that fulfils the documented API. Following pre-requistes are required to host this server
+**Receipt Processor**
+
+A webservice that fulfils the request demand in https://github.com/fetch-rewards/receipt-processor-challenge. Following pre-requistes are required to host this server
 1) Go compiler should be installed.
 
 To run this server, on unix, first build the executable using
